@@ -66,24 +66,25 @@ add_user() {
 
      mkdir -p "$userdir"
      wg genkey | tee $userdir/privatekey | wg pubkey > $userdir/publickey
+     wg genpsk > $userdir/presharedkey 2>/dev/null
 
      # client config file
      _PRIVATE_KEY=`cat $userdir/privatekey`
+     _PRESHARED_KEY=`cat $userdir/presharedkey`
      _VPN_IP=$(get_vpn_ip)
      if [[ -z $_VPN_IP ]]; then
          echo "no available ip"
          exit 1
      fi
      eval "echo \"$(cat "${template_file}")\"" > $userdir/client.conf
-     
+
      eval "echo \"$(cat "${template_file}")\"" > $userdir/client.all.conf
-     sed -r "s/AllowedIPs.*/AllowedIPs = 0.0.0.0\/0/g" -i $userdir/client.all.conf
-     
+     sed -r "s/AllowedIPs.*/AllowedIPs = 0.0.0.0\/0, ::\/0/g" -i $userdir/client.all.conf
+
      qrencode -t ansiutf8  < $userdir/client.conf
      qrencode -o $userdir/$user.png  < $userdir/client.conf
-
      qrencode -o $userdir/$user.all.png  < $userdir/client.all.conf
-     
+
      # change wg config
      local ip=${_VPN_IP%/*}/32
      local public_key=`cat $userdir/publickey`
@@ -94,8 +95,8 @@ add_user() {
        exit 1
      fi
 
-     echo "$user $_VPN_IP $public_key" >> ${SAVED_FILE}
-    
+     echo "$user $_VPN_IP $public_key $_PRESHARED_KEY" >> ${SAVED_FILE}
+
     else
      echo "$user already exists." 1>&2
      echo
@@ -129,7 +130,7 @@ del_user() {
         echo "$ip" >> ${AVAILABLE_IP_FILE}
     fi
     rm -rf $userdir
-    
+
     sort ${AVAILABLE_IP_FILE} --version-sort -o ${AVAILABLE_IP_FILE}
 }
 
@@ -139,12 +140,14 @@ generate_and_install_server_config_file() {
 
     # server config file
     eval "echo \"$(cat "${template_file}")\"" > $WG_TMP_CONF_FILE
-    while read user vpn_ip public_key; do
+    while read user vpn_ip public_key _PRESHARED_KEY; do
       ip=${vpn_ip%/*}/32
       cat >> $WG_TMP_CONF_FILE <<EOF
+
 [Peer]
 PublicKey = $public_key
 AllowedIPs = $ip
+PresharedKey = $_PRESHARED_KEY
 EOF
     done < ${SAVED_FILE}
     \cp -f $WG_TMP_CONF_FILE $WG_CONF_FILE
@@ -171,6 +174,8 @@ do_user() {
     fi
 
     generate_and_install_server_config_file
+
+    echo "Please remember to restart WireGuard: wg-quick down wg0 && wg-quick up wg0"
 }
 
 view_user() {
