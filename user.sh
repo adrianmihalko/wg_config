@@ -139,6 +139,12 @@ generate_and_install_server_config_file() {
 
     # server config file
     eval "echo \"$(cat "${template_file}")\"" > $WG_TMP_CONF_FILE
+
+    if [[ $_SERVER_ADD_DNS_SUPPORT -ne 0 ]];
+    then
+        echo "DNS = $_SERVER_DNS" >> $WG_TMP_CONF_FILE
+    fi
+
     while read user vpn_ip public_key; do
       ip=${vpn_ip%/*}/32
       cat >> $WG_TMP_CONF_FILE <<EOF
