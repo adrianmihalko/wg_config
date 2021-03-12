@@ -1,14 +1,40 @@
 #!/usr/bin/env bash
+####
+# Simple script to create and manage wireguard user VPN
+#
+####
+# @author faicker <https://github.com/faicker/wg-config>
+# @author adrianmihalko <https://github.com/adrianmihalko/wg_config>
+# 
+####
 
-cd `dirname ${BASH_SOURCE[0]}`
+#bo:system check
+if [[ ! -f /usr/bin/wg ]];
+then
+    echo ":: Dependency wireguard is missing"
+    exit 1
+fi
 
-. wg.def
-CLIENT_TPL_FILE=client.conf.tpl
-SERVER_TPL_FILE=server.conf.tpl
-SAVED_FILE=.saved
-AVAILABLE_IP_FILE=.available_ip
-WG_TMP_CONF_FILE=.$_INTERFACE.conf
-WG_CONF_FILE="/etc/wireguard/$_INTERFACE.conf"
+if [[ ! -f /usr/bin/qrencode ]];
+then
+    echo ":: Dependency qrencode is missing"
+    exit 1
+fi
+#eo:system check
+
+#change to path where this script is scored
+CURRENT_SCRIPT_PATH=$(cd $(dirname "${BASH_SOURCE[0]}"); pwd)
+
+#bo:setup
+#source configuration file
+. "${CURRENT_SCRIPT_PATH}/wg.def"
+CLIENT_TPL_FILE="${CURRENT_SCRIPT_PATH}/client.conf.tpl"
+SERVER_TPL_FILE="${CURRENT_SCRIPT_PATH}/server.conf.tpl"
+SAVED_FILE="${CURRENT_SCRIPT_PATH}/.saved"
+AVAILABLE_IP_FILE="${CURRENT_SCRIPT_PATH}/.available_ip"
+WG_TMP_CONF_FILE="${CURRENT_SCRIPT_PATH}/.${_INTERFACE}.conf"
+WG_CONF_FILE="/etc/wireguard/${_INTERFACE}.conf"
+#eo:setup
 
 dec2ip() {
     local delim=''
@@ -32,12 +58,12 @@ generate_cidr_ip_file_if() {
     local beg=$((a * 256 ** 3 + b * 256 ** 2 + c * 256 + d))
     local end=$(( beg+(1<<(32-mask))-1 ))
     ip=$(dec2ip $((beg+1)))
-    _SERVER_IP="$ip/$mask"
-    if [[ -f $AVAILABLE_IP_FILE ]]; then
+    _SERVER_IP="${ip}/${mask}"
+    if [[ -f ${AVAILABLE_IP_FILE} ]]; then
         return
     fi
 
-    > $AVAILABLE_IP_FILE
+    > ${AVAILABLE_IP_FILE}
     local i=$((beg+2))
     while [[ $i -lt $end ]]; do
         ip=$(dec2ip $i)
@@ -61,52 +87,77 @@ add_user() {
     local interface=${_INTERFACE}
     local userdir="users/$user"
 
-    if [ ! -d "$userdir" ]
+    if [[ ! -d "${userdir}" ]];
     then
 
-     mkdir -p "$userdir"
-     wg genkey | tee $userdir/privatekey | wg pubkey > $userdir/publickey
+        mkdir -p "${userdir}"
+        wg genkey | tee ${userdir}/privatekey | wg pubkey > ${userdir}/publickey
 
-     # client config file
-     _PRIVATE_KEY=`cat $userdir/privatekey`
-     _VPN_IP=$(get_vpn_ip)
-     if [[ -z $_VPN_IP ]]; then
-         echo "no available ip"
-         exit 1
-     fi
-     eval "echo \"$(cat "${template_file}")\"" > $userdir/client.conf
-     
-     eval "echo \"$(cat "${template_file}")\"" > $userdir/client.all.conf
-     sed -r "s/AllowedIPs.*/AllowedIPs = 0.0.0.0\/0/g" -i $userdir/client.all.conf
-     
-     qrencode -t ansiutf8  < $userdir/client.conf
-     qrencode -o $userdir/$user.png  < $userdir/client.conf
+        # client config file
+        _PRIVATE_KEY=`cat ${userdir}/privatekey`
+        _VPN_IP=$(get_vpn_ip)
 
-     qrencode -o $userdir/$user.all.png  < $userdir/client.all.conf
-     
-     # change wg config
-     local ip=${_VPN_IP%/*}/32
-     local public_key=`cat $userdir/publickey`
-     wg set $interface peer $public_key allowed-ips $ip
-     if [[ $? -ne 0 ]]; then
-       echo "wg set failed"
-       rm -rf $user
-       exit 1
-     fi
+        if [[ -z ${_VPN_IP} ]];
+        then
+            echo "no available ip"
+            exit 1
+        fi
+        eval "echo \"$(cat "${template_file}")\"" > $userdir/client.conf
 
-     echo "$user $_VPN_IP $public_key" >> ${SAVED_FILE}
-    
+        if [[ ${_CLIENT_GENERATE_PSK} -eq 1 ]];
+        then
+            wg genpsk > ${userdir}/presharedkey
+            _PRESHARED_KEY=`cat ${userdir}/presharedkey`
+
+            cat >>${userdir}/client.conf<<DELIM
+PresharedKey = ${_PRESHARED_KEY}
+DELIM
+        fi
+
+        if [[ ${_CLIENT_ADD_KEEPALIVE} -eq 1 ]];
+        then
+            cat >>${userdir}/client.conf<<DELIM
+PersistentKeeptalive = ${_CLIENT_KEEPALIVE}
+DELIM
+        fi
+     
+        cp ${userdir}/client.conf ${userdir}/client.all.conf
+        sed -r "s/AllowedIPs.*/AllowedIPs = 0.0.0.0\/0/g" -i $userdir/client.all.conf
+
+        qrencode -t ansiutf8  < $userdir/client.conf
+        qrencode -o $userdir/$user.png  < $userdir/client.conf
+
+        qrencode -o $userdir/$user.all.png  < $userdir/client.all.conf
+     
+        # change wg config
+        local ip=${_VPN_IP%/*}/32
+        local public_key=`cat $userdir/publickey`
+        wg set $interface peer $public_key allowed-ips $ip
+        if [[ $? -ne 0 ]]; then
+            echo ":: error: wg set failed"
+            rm -rf $user
+
+            exit 1
+        fi
+
+        if [[ ${_CLIENT_GENERATE_PSK} -eq 1 ]];
+        then
+            echo "$user $_VPN_IP $public_key ${_PRESHARED_KEY}" >> ${SAVED_FILE}
+        else
+            echo "$user $_VPN_IP $public_key" >> ${SAVED_FILE}
+        fi
     else
-     echo "$user already exists." 1>&2
-     echo
-     read -r -p "Overwrite current user? [y/N]" response
-     if [[ "$response" =~ ^([yY][eE][sS]|[yY])+$ ]]
-     then
-        del_user $user
-        add_user $user
-     else
-        echo "Exiting."
-     fi
+        echo "$user already exists." 1>&2
+        echo ""
+        read -r -p "Overwrite current user? [y/N]" response
+
+        if [[ "$response" =~ ^([yY][eE][sS]|[yY])+$ ]];
+        then
+            del_user $user
+            add_user $user
+        else
+            echo "Exiting."
+        fi
     fi
 }
 
@@ -134,8 +185,9 @@ del_user() {
 }
 
 generate_and_install_server_config_file() {
-    local template_file=${SERVER_TPL_FILE}
     local ip
+    local preshared_key
+    local template_file=${SERVER_TPL_FILE}
 
     # server config file
     eval "echo \"$(cat "${template_file}")\"" > $WG_TMP_CONF_FILE
@@ -145,15 +197,70 @@ generate_and_install_server_config_file() {
         echo "DNS = $_SERVER_DNS" >> $WG_TMP_CONF_FILE
     fi
 
-    while read user vpn_ip public_key; do
-      ip=${vpn_ip%/*}/32
-      cat >> $WG_TMP_CONF_FILE <<EOF
+    if [[ ${_CLIENT_GENERATE_PSK} -eq 1 ]];
+    then
+        while read user vpn_ip public_key preshared_key; do
+            ip=${vpn_ip%/*}/32
+            cat >> $WG_TMP_CONF_FILE <<EOF
+
+[Peer]
+PublicKey = $public_key
+AllowedIPs = $ip
+PresharedKey = ${preshared_key}
+EOF
+        done < ${SAVED_FILE}
+    else
+        while read user vpn_ip public_key; do
+            ip=${vpn_ip%/*}/32
+            cat >> $WG_TMP_CONF_FILE <<EOF
+
 [Peer]
 PublicKey = $public_key
 AllowedIPs = $ip
 EOF
-    done < ${SAVED_FILE}
+        done < ${SAVED_FILE}
+    fi
     \cp -f $WG_TMP_CONF_FILE $WG_CONF_FILE
+
+    if [[ ${_SERVER_ENABLE_IP_FORWARDING} -eq 1 ]];
+    then
+        local CONFIGURATION_FILE_PATH="/etc/sysctl.d/20-wireguard.conf"
+
+        local CONFIGURATION_PATH=$(dirname ${CONFIGURATION_FILE_PATH})
+
+        if [[ ! -d ${CONFIGURATION_PATH} ]];
+        then
+            \mkdir ${CONFIGURATION_PATH}
+        fi
+
+        if [[ -f ${CONFIGURATION_FILE_PATH} ]];
+        then
+            #check if >>net.ipv4.ip_forward=1<< is inside the file
+            cat ${CONFIGURATION_FILE_PATH} | grep -q 'net.ipv4.ip_forward=1'
+
+            if [[ $? -eq 1 ]];
+            then
+                cat >>${CONFIGURATION_FILE_PATH}<<DELIM
+net.ipv4.ip_forward=1
+DELIM
+            fi
+
+            #check if >>net.ipv6.conf.all.forwarding=1<< is inside the file
+            cat ${CONFIGURATION_FILE_PATH} | grep -q 'net.ipv6.conf.all.forwarding=1'
+
+            if [[ $? -eq 1 ]];
+            then
+                cat >>${CONFIGURATION_FILE_PATH}<<DELIM
+net.ipv6.conf.all.forwarding=1
+DELIM
+            fi
+        else
+            cat >${CONFIGURATION_FILE_PATH}<<DELIM
+net.ipv4.ip_forward=1
+net.ipv6.conf.all.forwarding=1
+DELIM
+        fi
+    fi
 }
 
 do_clear() {
