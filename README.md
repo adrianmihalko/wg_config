@@ -64,3 +64,4 @@ This will show generated QR codes.
 # TO DO
 
 * add support for preshared key
+* fix all errors in script from shellcheck
