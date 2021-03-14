@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ####
-# Checks that all mandatory dependencies are set
+# Checks that all mandatory dependencies are available
 ####
 # @author stev leibelt <artodeto@bazzline.net>
 ####
