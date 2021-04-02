@@ -1,0 +1,12 @@
+_INTERFACE=wg0
+_CLIENT_ADD_KEEPALIVE=0
+_CLIENT_KEEPALIVE=25    #set to 1 if you want the line `PersistentKeepalive = 25` to be added
+_CLIENT_GENERATE_PSK=0 #set tp 1 if you want to the line `PresharedKey = ` to be added
+_VPN_NET=192.168.99.0/24
+_SERVER_PORT=51820
+_SERVER_LISTEN=wg.example.com:$_SERVER_PORT
+_SERVER_PUBLIC_KEY=
+_SERVER_PRIVATE_KEY=
+_SERVER_ADD_DNS_SUPPORT=0   #set to 1 if you want the line `DNS = $_SERVER_DNS` added to the server configuration
+_SERVER_DNS=
+_SERVER_ENABLE_IP_FORWARDING=0  #set to 1 if you want to create the file `/etc/sysctl.d/20-wireguard.conf`
